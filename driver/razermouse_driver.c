@@ -24,6 +24,7 @@
 #include <linux/init.h>
 #include <linux/usb/input.h>
 #include <linux/hid.h>
+#include <linux/random.h>
 
 #include "razermouse_driver.h"
 #include "razercommon.h"
@@ -116,6 +117,10 @@ static ssize_t razer_attr_read_device_type(struct device *dev, struct device_att
 
     switch (usb_dev->descriptor.idProduct)
     {
+		case USB_DEVICE_ID_RAZER_DEATHADDER_3500:
+		    device_type = "Razer DeathAdder 3500\n";
+		    break;
+		
         case USB_DEVICE_ID_RAZER_MAMBA_WIRED:
             device_type = "Razer Mamba (Wired)\n";
             break;
@@ -182,19 +187,25 @@ static ssize_t razer_attr_read_device_type(struct device *dev, struct device_att
  */
 static ssize_t razer_attr_read_get_firmware_version(struct device *dev, struct device_attribute *attr, char *buf)
 {
-    struct usb_interface *intf = to_usb_interface(dev->parent);
-    struct usb_device *usb_dev = interface_to_usbdev(intf);
+	struct razer_mouse_device *device = dev_get_drvdata(dev);
+	
     struct razer_report report = razer_chroma_standard_get_firmware_version();
     struct razer_report response_report;
     
-    switch(usb_dev->descriptor.idProduct) {
+    switch(device->usb_pid) {
+		case USB_DEVICE_ID_RAZER_DEATHADDER_3500: // DA dont think supports fw, its proper old
+			return sprintf(buf, "v%d.%d\n", 0x01, 0x00);
+			break;
+		
         case USB_DEVICE_ID_RAZER_NAGA_HEX_V2:
         case USB_DEVICE_ID_RAZER_DEATHADDER_ELITE:
             report.transaction_id.id = 0x3f;
             break;
     }
 
-    response_report = razer_send_payload(usb_dev, &report);
+	mutex_lock(&device->lock);
+    response_report = razer_send_payload(device->usb_dev, &report);
+    mutex_unlock(&device->lock);
     
     return sprintf(buf, "v%d.%d\n", response_report.arguments[0], response_report.arguments[1]);
 }
@@ -206,6 +217,14 @@ static ssize_t razer_attr_read_get_firmware_version(struct device *dev, struct d
  */
 static ssize_t razer_attr_write_test(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
+	struct razer_mouse_device *device = dev_get_drvdata(dev);
+	char data[4] = { 0 };
+	unsigned char direction = (unsigned char)simple_strtoul(buf, NULL, 10);
+	
+	data[3] = clamp_u8(direction, 0x00, 0x03);
+	
+	razer_send_control_msg_old_device(device->usb_dev, &data[0], 0x10, 0x00, 4, 3000, 3000);
+	
     return count;
 }
 
@@ -444,22 +463,28 @@ static ssize_t razer_attr_write_mode_breath(struct device *dev, struct device_at
  */
 static ssize_t razer_attr_read_get_serial(struct device *dev, struct device_attribute *attr, char *buf)
 {
-    struct usb_interface *intf = to_usb_interface(dev->parent);
-    struct usb_device *usb_dev = interface_to_usbdev(intf);
+	struct razer_mouse_device *device = dev_get_drvdata(dev);
+	
     char serial_string[23];
     struct razer_report report = razer_chroma_standard_get_serial();
     struct razer_report response_report;
     
-    switch(usb_dev->descriptor.idProduct) {
+    switch(device->usb_pid) {
+		case USB_DEVICE_ID_RAZER_DEATHADDER_3500:
+			return sprintf(buf, "%s\n", &device->serial[0]);
+			break;
+		
         case USB_DEVICE_ID_RAZER_NAGA_HEX_V2:
         case USB_DEVICE_ID_RAZER_DEATHADDER_ELITE:
             report.transaction_id.id = 0x3f;
             break;
     }
     
-    response_report = razer_send_payload(usb_dev, &report);
+    mutex_lock(&device->lock);
+    response_report = razer_send_payload(device->usb_dev, &report);
     strncpy(&serial_string[0], &response_report.arguments[0], 22);
     serial_string[22] = '\0';
+    mutex_unlock(&device->lock);
 
     return sprintf(buf, "%s\n", &serial_string[0]);
 }
@@ -937,22 +962,28 @@ static ssize_t razer_attr_write_set_key_row(struct device *dev, struct device_at
  */
 static ssize_t razer_attr_write_device_mode(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
-    struct usb_interface *intf = to_usb_interface(dev->parent);
-    struct usb_device *usb_dev = interface_to_usbdev(intf);
+	struct razer_mouse_device *device = dev_get_drvdata(dev);
     struct razer_report report;
     
     if(count == 2)
     {
         report = razer_chroma_standard_set_device_mode(buf[0], buf[1]);
         
-        switch(usb_dev->descriptor.idProduct) {
+        switch(device->usb_pid) {
+			case USB_DEVICE_ID_RAZER_DEATHADDER_3500: // Doesnt support device mode, exit early
+			    return count;
+			    break;
+			
+			
             case USB_DEVICE_ID_RAZER_NAGA_HEX_V2:
             case USB_DEVICE_ID_RAZER_DEATHADDER_ELITE:
                 report.transaction_id.id = 0x3f;
                 break;
         }
         
-        razer_send_payload(usb_dev, &report);
+        mutex_lock(&device->lock);
+        razer_send_payload(device->usb_dev, &report);
+        mutex_unlock(&device->lock);
     } else {
         printk(KERN_WARNING "razerkbd: Device mode only takes 2 bytes.");
     }
@@ -967,19 +998,25 @@ static ssize_t razer_attr_write_device_mode(struct device *dev, struct device_at
  */
 static ssize_t razer_attr_read_device_mode(struct device *dev, struct device_attribute *attr, char *buf)
 {
-    struct usb_interface *intf = to_usb_interface(dev->parent);
-    struct usb_device *usb_dev = interface_to_usbdev(intf);
+	struct razer_mouse_device *device = dev_get_drvdata(dev);
+	
     struct razer_report report = razer_chroma_standard_get_device_mode();
     struct razer_report response;
     
-    switch(usb_dev->descriptor.idProduct) {
+    switch(device->usb_pid) {
+		case USB_DEVICE_ID_RAZER_DEATHADDER_3500: // Doesnt support device mode, exit early
+		    return sprintf(buf, "%d:%d\n", 0x00, 0x00);
+		    break;
+		
         case USB_DEVICE_ID_RAZER_NAGA_HEX_V2:
         case USB_DEVICE_ID_RAZER_DEATHADDER_ELITE:
             report.transaction_id.id = 0x3f;
             break;
     }
     
-    response = razer_send_payload(usb_dev, &report);
+    mutex_lock(&device->lock);
+    response = razer_send_payload(device->usb_dev, &report);
+    mutex_unlock(&device->lock);
     
     return sprintf(buf, "%d:%d\n", response.arguments[0], response.arguments[1]);
 }
@@ -1725,7 +1762,23 @@ static DEVICE_ATTR(logo_matrix_effect_static,      0220, NULL,                  
 static DEVICE_ATTR(logo_matrix_effect_none,        0220, NULL,                             razer_attr_write_logo_mode_none);
 
 
-
+void razer_mouse_init(struct razer_mouse_device *dev, struct usb_interface *intf, struct hid_device *hdev) {
+    struct usb_device *usb_dev = interface_to_usbdev(intf);
+    unsigned int rand_serial = 0;
+    
+    // Initialise mutex
+    mutex_init(&dev->lock);
+    
+    // Setup fields
+    dev->usb_dev = usb_dev;
+    dev->usb_vid = usb_dev->descriptor.idVendor;
+    dev->usb_pid = usb_dev->descriptor.idProduct;
+    dev->usb_interface_protocol = intf->cur_altsetting->desc.bInterfaceProtocol;
+                    
+    // Get a "random" integer
+    get_random_bytes(&rand_serial, sizeof(unsigned int));
+    sprintf(&dev->serial[0], "PH%012u", rand_serial);
+}
 
 /**
  * Probe method is ran whenever a device is binded to the driver
@@ -1734,7 +1787,7 @@ static int razer_mouse_probe(struct hid_device *hdev, const struct hid_device_id
 {
     int retval = 0;
     struct usb_interface *intf = to_usb_interface(hdev->dev.parent);
-    struct usb_device *usb_dev = interface_to_usbdev(intf);
+    //struct usb_device *usb_dev = interface_to_usbdev(intf);
     struct razer_mouse_device *dev = NULL;
 
     dev = kzalloc(sizeof(struct razer_mouse_device), GFP_KERNEL);
@@ -1745,7 +1798,10 @@ static int razer_mouse_probe(struct hid_device *hdev, const struct hid_device_id
         goto exit;
     }
     
-    if(intf->cur_altsetting->desc.bInterfaceProtocol == USB_INTERFACE_PROTOCOL_MOUSE)
+    // Init data
+    razer_mouse_init(dev, intf, hdev);
+    
+    if(dev->usb_interface_protocol == USB_INTERFACE_PROTOCOL_MOUSE)
     {
         CREATE_DEVICE_FILE(&hdev->dev, &dev_attr_version);
         CREATE_DEVICE_FILE(&hdev->dev, &dev_attr_test);
@@ -1754,7 +1810,7 @@ static int razer_mouse_probe(struct hid_device *hdev, const struct hid_device_id
         CREATE_DEVICE_FILE(&hdev->dev, &dev_attr_device_serial);
         CREATE_DEVICE_FILE(&hdev->dev, &dev_attr_device_mode);
         
-        switch(usb_dev->descriptor.idProduct)
+        switch(dev->usb_pid)
         {
             case USB_DEVICE_ID_RAZER_DEATHADDER_ELITE:
                 CREATE_DEVICE_FILE(&hdev->dev, &dev_attr_poll_rate);
@@ -1925,6 +1981,7 @@ static int razer_mouse_probe(struct hid_device *hdev, const struct hid_device_id
     }
 
     hid_set_drvdata(hdev, dev);
+    dev_set_drvdata(&hdev->dev, dev);
 
     retval = hid_parse(hdev);
     if(retval)    {

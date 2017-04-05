@@ -16,6 +16,11 @@
 #define USB_VENDOR_ID_RAZER 0x1532
 #endif
 
+
+#ifndef USB_DEVICE_ID_RAZER_DEATHADDER_3500
+ #define USB_DEVICE_ID_RAZER_DEATHADDER_3500 0x0016
+#endif
+
 #ifndef USB_DEVICE_ID_RAZER_IMPERATOR // 2012
  #define USB_DEVICE_ID_RAZER_IMPERATOR 0x002F
 #endif
@@ -81,12 +86,15 @@
 #define RAZER_MOUSE_WAIT_MAX_US 800
 
 struct razer_mouse_device {
-    //struct input_dev *dev;
-    struct usb_device *usbdev;
-    struct hid_device *hiddev;
-    unsigned char effect;
-    char name[128];
-    char phys[64];
+    struct usb_device *usb_dev;
+    unsigned char usb_interface_protocol;
+    
+    unsigned short usb_vid;
+    unsigned short usb_pid;
+        
+    struct mutex lock;
+    
+    char serial[23]; // Now storing a random serial to be used with old devices that dont support it
 };
 
 // Mamba Key Location
