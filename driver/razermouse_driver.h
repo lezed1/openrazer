@@ -95,6 +95,10 @@ struct razer_mouse_device {
     struct mutex lock;
     
     char serial[23]; // Now storing a random serial to be used with old devices that dont support it
+    
+    // For deathadder3500, uses OR logic so need to remember last values. Part of a 4byte payload
+    char da3500_lighting_bitfield;
+    char da3500_poll_bitfield;
 };
 
 // Mamba Key Location

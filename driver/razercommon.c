@@ -251,8 +251,3 @@ int razer_send_control_msg_old_device(struct usb_device *usb_dev,void const *dat
 
 
 
-
-
-
-
-
