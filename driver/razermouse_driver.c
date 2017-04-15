@@ -117,9 +117,9 @@ static ssize_t razer_attr_read_device_type(struct device *dev, struct device_att
 
     switch (usb_dev->descriptor.idProduct)
     {
-		case USB_DEVICE_ID_RAZER_DEATHADDER_3500:
-		    device_type = "Razer DeathAdder 3500\n";
-		    break;
+        case USB_DEVICE_ID_RAZER_DEATHADDER_3500:
+            device_type = "Razer DeathAdder 3500\n";
+            break;
 		
         case USB_DEVICE_ID_RAZER_MAMBA_WIRED:
             device_type = "Razer Mamba (Wired)\n";
@@ -1762,6 +1762,7 @@ static DEVICE_ATTR(logo_matrix_effect_static,      0220, NULL,                  
 static DEVICE_ATTR(logo_matrix_effect_none,        0220, NULL,                             razer_attr_write_logo_mode_none);
 
 
+
 void razer_mouse_init(struct razer_mouse_device *dev, struct usb_interface *intf, struct hid_device *hdev) {
     struct usb_device *usb_dev = interface_to_usbdev(intf);
     unsigned int rand_serial = 0;
@@ -1778,6 +1779,54 @@ void razer_mouse_init(struct razer_mouse_device *dev, struct usb_interface *intf
     // Get a "random" integer
     get_random_bytes(&rand_serial, sizeof(unsigned int));
     sprintf(&dev->serial[0], "PH%012u", rand_serial);
+}
+
+/**
+ * Raw event function
+ */
+static int razer_raw_event(struct hid_device *hdev, struct hid_report *report, u8 *data, int size)
+{
+    struct usb_interface *intf = to_usb_interface(hdev->dev.parent);
+    
+    // The event were looking for is 16 bytes long and starts with 0x04
+    if(intf->cur_altsetting->desc.bInterfaceProtocol == USB_INTERFACE_PROTOCOL_KEYBOARD && size == 16 && data[0] == 0x04)
+    {
+        // Convert 04... to 0100...
+        int index = size-1; // This way we start at 2nd last value, does subtract 1 from the 15key rollover though (not an issue cmon)
+        u8 cur_value = 0x00;
+        
+        while(--index > 0)
+        {
+			cur_value = data[index];
+			if(cur_value == 0x00) { // Skip 0x00
+				continue;
+			}
+			
+			switch(cur_value) {
+				case 0x20: // DPI Up
+					cur_value = 0x68; // F13
+					break;
+				case 0x21: // DPI Down
+					cur_value = 0x69; // F14
+					break;
+				case 0x22: // Wheel Left
+					cur_value = 0x6A; // F15
+					break;
+				case 0x23: // Wheel Right
+					cur_value = 0x6B; // F16
+					break;
+			}
+			
+			data[index+1] = cur_value;
+		}
+		
+		
+		data[0] = 0x01;
+		data[1] = 0x00;
+		return 1;
+	}
+	
+	return 0;
 }
 
 /**
@@ -2206,8 +2255,8 @@ static void razer_mouse_disconnect(struct hid_device *hdev)
  * Device ID mapping table
  */
 static const struct hid_device_id razer_devices[] = {
-	{ HID_USB_DEVICE(USB_VENDOR_ID_RAZER,USB_DEVICE_ID_RAZER_DEATHADDER_3500) },
-	{ HID_USB_DEVICE(USB_VENDOR_ID_RAZER,USB_DEVICE_ID_RAZER_NAGA_HEX) },
+    { HID_USB_DEVICE(USB_VENDOR_ID_RAZER,USB_DEVICE_ID_RAZER_DEATHADDER_3500) },
+    { HID_USB_DEVICE(USB_VENDOR_ID_RAZER,USB_DEVICE_ID_RAZER_NAGA_HEX) },
     { HID_USB_DEVICE(USB_VENDOR_ID_RAZER,USB_DEVICE_ID_RAZER_MAMBA_WIRED) },
     { HID_USB_DEVICE(USB_VENDOR_ID_RAZER,USB_DEVICE_ID_RAZER_MAMBA_WIRELESS) },
     { HID_USB_DEVICE(USB_VENDOR_ID_RAZER,USB_DEVICE_ID_RAZER_MAMBA_TE_WIRED) },
@@ -2234,6 +2283,8 @@ static struct hid_driver razer_mouse_driver = {
     .id_table  = razer_devices,
     .probe     = razer_mouse_probe,
     .remove    = razer_mouse_disconnect,
+
+    .raw_event = razer_raw_event,
 };
 
 module_hid_driver(razer_mouse_driver);
