@@ -8,11 +8,11 @@ service:
 	@sed "s|##PREFIX##|$(PREFIX)|" resources/org.razer.service.in > org.razer.service
 	@sed "s|##PREFIX##|$(PREFIX)|" resources/openrazer-daemon.systemd.service.in > openrazer-daemon.service
 
-install-resources: service
+install-resources:
 	@install -m 644 -D -v resources/razer.conf $(DESTDIR)$(PREFIX)/share/openrazer/razer.conf.example
 	@install -m 755 -D -v run_openrazer_daemon.py $(DESTDIR)$(PREFIX)/bin/openrazer-daemon
 
-install-systemd:
+install-systemd: service
 	@install -m 644 -D -v org.razer.service $(DESTDIR)$(PREFIX)/share/dbus-1/services/org.razer.service
 	@install -m 644 -D -v openrazer-daemon.service $(DESTDIR)$(PREFIX)/lib/systemd/user/openrazer-daemon.service
 
